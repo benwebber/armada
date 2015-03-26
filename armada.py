@@ -7,7 +7,7 @@ import requests
 import uritemplate
 
 
-class Client(object):
+class FleetClient(object):
     """
     A Fleet API client.
     """
@@ -19,8 +19,8 @@ class Client(object):
 
     def _discover(self):
         self._discovery_url = '{}/discovery'.format(self.url)
-        resp = requests.get(self._discovery_url)
-        return resp.json()
+        response = requests.get(self._discovery_url)
+        return response.json()
 
     @property
     def resources(self):
@@ -32,12 +32,12 @@ class Client(object):
 
     def _build(self):
         for resource, interface in self._discovery.get('resources').items():
-            resource = Resource(resource)
+            resource = FleetResource(resource)
             methods = interface.get('methods')
- 
+
             for method, contract in methods.items():
                 path = contract.get('path')
-                endpoint = '{}/{}'.format(self.url, contract.get('path'))
+                endpoint = '{}/{}'.format(self.url, path)
                 resource._create_and_attach_method(method, endpoint, contract)
 
             self._resources.append(resource)
@@ -46,7 +46,7 @@ class Client(object):
             setattr(self, camel_to_snake_case(resource.name), resource)
 
 
-class Resource(object):
+class FleetResource(object):
     def __init__(self, name):
         self.name = name
 
