@@ -2,6 +2,7 @@
 
 import copy
 import re
+import types
 
 import requests
 import uritemplate
@@ -38,7 +39,7 @@ class FleetClient(object):
             for method, contract in methods.items():
                 path = contract.get('path')
                 endpoint = '{}/{}'.format(self.url, path)
-                resource._create_and_attach_method(method, endpoint, contract)
+                resource._add_method(method, endpoint, contract)
 
             self._resources.append(resource)
 
@@ -50,8 +51,10 @@ class FleetResource(object):
     def __init__(self, name):
         self.name = name
 
-    def _create_method(self, endpoint, contract):
-        def api_request(**kwargs):
+    def _add_method(self, name, endpoint, contract):
+        name = str(camel_to_snake_case(name))
+
+        def method(self, *args, **kwargs):
             http_method = contract.get('httpMethod')
             headers = {'Content-Type': 'application/json'}
             payload = copy.copy(kwargs)
@@ -69,18 +72,13 @@ class FleetResource(object):
             return requests.request(http_method, url, headers=headers,
                                     params=payload)
 
-        new_method = api_request
-        new_method.__doc__ = contract.get('description')
+        method.__doc__ = contract.get('description')
+        method.__name__ = name
 
-        return new_method
+        # Construct an empty class to hold the method.
+        cls = types.ClassType(str(self.name), (object,), {})
 
-    def _attach_method(self, name, method):
-        setattr(self, name, method)
-
-    def _create_and_attach_method(self, name, endpoint, contract):
-        name = camel_to_snake_case(name)
-        method = self._create_method(endpoint, contract)
-        setattr(self, name, method)
+        setattr(self, name, types.MethodType(method, self, cls))
 
 
 def camel_to_snake_case(name):
