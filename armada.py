@@ -73,18 +73,19 @@ class FleetResource(object):
             # the keyword arguments.
             params = dict((p, kwargs.get(k)) for (p, k) in params_to_kwargs.items())
 
+            # We cannot change the method signature at runtime to require
+            # specific positional arguments. We can fake it, however:
+            # the API suggests required parameters.
+            required_params = contract.get('parameterOrder')
+            # Join positional arguments with the rest of the keyword-based
+            # parameters.
+            for param_name, param_value in zip(required_params, args):
+                params[param_name] = param_value
+
+            validate_args(name, args, required_params)
+
             # Expand the URI template to construct the final URL.
             url = uritemplate.expand(endpoint, params)
-
-            # Track required parameters.
-            # We cannot change the method signature at runtime to require
-            # positional arguments. Handle keyword arguments instead.
-            required_kwargs = []
-            for param_name, param_spec in param_schema.items():
-                required = param_spec.get('required', False)
-                if required:
-                    required_kwargs.append(params_to_kwargs[param_name])
-            validate_required_kwargs(kwargs, required_kwargs)
 
             for param_name, param_spec in param_schema.items():
                 # If the parameter is part of the URL, remove it from the query
@@ -111,26 +112,25 @@ def camel_to_snake_case(name):
     return re.sub(r'(.)([A-Z][a-z]+)', r'\1_\2', name).lower()
 
 
-def validate_required_kwargs(kwargs, required_kwargs=None):
+def validate_args(name, args, required_args):
     """
-    Validates required keyword arguments.
+    Validate the number of positional arguments.
+
+    Duplicates the behaviour of functions with stable signatures.
 
     Args:
-        kwargs (dict): Keyword arguments.
-        required_kwargs (list): Required keyword arguments.
+        name (str): Function name.
+        args (tuple, list): Positional arguments to validate.
+        required_args (tuple, list): Required arguments.
 
     Raises:
-        TypeError: One or more required keyword arguments is missing.
+        TypeError: The number of positional arguments does not match the
+            required number.
     """
-    if not required_kwargs:
+    if len(args) == len(required_args):
         return
-
-    missing_kwargs = [k for k in required_kwargs if k not in kwargs]
-    if not missing_kwargs:
-        return
-
-    plural = 's' if len(missing_kwargs) > 1 else ''
-    raise TypeError("missing {} required keyword argument{}: {}".format(
-        len(missing_kwargs), plural,
-        ', '.join(("'{}'".format(k) for k in missing_kwargs)),
-    ))
+    superlative = 'most' if len(args) > len(required_args) else 'least'
+    plural = 's' if len(required_args) > 1 else ''
+    raise(TypeError('{}() takes at {} {} argument{} ({} given)'.format(
+        name, superlative, len(required_args), plural, len(args)
+    )))
