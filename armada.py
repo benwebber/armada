@@ -75,7 +75,7 @@ class FleetResource(object):
             # We cannot change the method signature at runtime to require
             # specific positional arguments. We can fake it, however:
             # the API suggests required parameters.
-            required_params = contract.get('parameterOrder')
+            required_params = contract.get('parameterOrder', ())
             # Join positional arguments with the rest of the keyword-based
             # parameters.
             for param_name, param_value in zip(required_params, args):
