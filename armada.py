@@ -57,20 +57,43 @@ class FleetResource(object):
         def method(self, *args, **kwargs):
             http_method = contract.get('httpMethod')
             headers = {'Content-Type': 'application/json'}
-            payload = copy.copy(kwargs)
+            param_schema = contract.get('parameters')
+
+            # Construct a set of utility dictionaries to map data between
+            # the Python binding's keyword arguments and the mixedCase
+            # parameters used in the Fleet API service description.
+            #
+            # Map schema parameters to Python-style keyword arguments, and vice
+            # versa.
+            params_to_kwargs = dict((p, camel_to_snake_case(p))
+                                    for p in param_schema.keys())
+            kwargs_to_params = dict((k, p)
+                                    for (p, k) in params_to_kwargs.items())
+            # Construct the equivalent dictionary of API parameter values from
+            # the keyword arguments.
+            params = dict((p, kwargs.get(k)) for (p, k) in params_to_kwargs.items())
 
             # Expand the URI template to construct the final URL.
-            url = uritemplate.expand(endpoint, payload)
+            url = uritemplate.expand(endpoint, params)
 
-            for param_name, param_spec in contract.get('parameters').items():
+            # Track required parameters.
+            # We cannot change the method signature at runtime to require
+            # positional arguments. Handle keyword arguments instead.
+            required_kwargs = []
+            for param_name, param_spec in param_schema.items():
+                required = param_spec.get('required', False)
+                if required:
+                    required_kwargs.append(params_to_kwargs[param_name])
+            validate_required_kwargs(kwargs, required_kwargs)
+
+            for param_name, param_spec in param_schema.items():
                 # If the parameter is part of the URL, remove it from the query
                 # string.
-                if (param_spec.get('location') == 'path' and
-                        param_name in payload):
-                    del payload[param_name]
+                if (param_spec.get('location') == 'path' and param_name in params):
+                    del params[param_name]
 
             return requests.request(http_method, url, headers=headers,
-                                    params=payload)
+                                    params=params)
 
         method.__doc__ = contract.get('description')
         method.__name__ = name
@@ -86,3 +109,28 @@ def camel_to_snake_case(name):
     Convert a name in CamelCase to snake_case.
     """
     return re.sub(r'(.)([A-Z][a-z]+)', r'\1_\2', name).lower()
+
+
+def validate_required_kwargs(kwargs, required_kwargs=None):
+    """
+    Validates required keyword arguments.
+
+    Args:
+        kwargs (dict): Keyword arguments.
+        required_kwargs (list): Required keyword arguments.
+
+    Raises:
+        TypeError: One or more required keyword arguments is missing.
+    """
+    if not required_kwargs:
+        return
+
+    missing_kwargs = [k for k in required_kwargs if k not in kwargs]
+    if not missing_kwargs:
+        return
+
+    plural = 's' if len(missing_kwargs) > 1 else ''
+    raise TypeError("missing {} required keyword argument{}: {}".format(
+        len(missing_kwargs), plural,
+        ', '.join(("'{}'".format(k) for k in missing_kwargs)),
+    ))
