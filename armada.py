@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import re
+import textwrap
 import types
 
 import requests
@@ -51,23 +52,8 @@ class FleetResource(object):
         self.name = name
 
     def _add_method(self, name, endpoint, contract):
-        name = str(camel_to_snake_case(name))
 
         def method(self, *args, **kwargs):
-            http_method = contract.get('httpMethod')
-            headers = {'Content-Type': 'application/json'}
-            param_schema = contract.get('parameters')
-
-            # Construct a set of utility dictionaries to map data between
-            # the Python binding's keyword arguments and the mixedCase
-            # parameters used in the Fleet API service description.
-            #
-            # Map schema parameters to Python-style keyword arguments, and vice
-            # versa.
-            params_to_kwargs = dict((p, camel_to_snake_case(p))
-                                    for p in param_schema.keys())
-            kwargs_to_params = dict((k, p)
-                                    for (p, k) in params_to_kwargs.items())
             # Construct the equivalent dictionary of API parameter values from
             # the keyword arguments.
             params = dict((p, kwargs.get(k)) for (p, k) in params_to_kwargs.items())
@@ -95,20 +81,110 @@ class FleetResource(object):
             return requests.request(http_method, url, headers=headers,
                                     params=params)
 
-        method.__doc__ = contract.get('description')
+        name = str(camel_to_snake_case(name))
+        http_method = contract.get('httpMethod')
+        headers = {'Content-Type': 'application/json'}
+
+        # Construct a set of utility dictionaries to map data between the
+        # Python binding's keyword arguments and the mixedCase parameters used
+        # in the Fleet API service description.
+        param_schema = contract.get('parameters')
+        params_to_kwargs = dict((p, camel_to_snake_case(p))
+                                for p in param_schema.keys())
+        kwargs_to_params = dict((k, p)
+                                for (p, k) in params_to_kwargs.items())
+
+        # Finally, Pythonize the parameter schema to construct nice docstrings.
+        docstring_parameters= dict((params_to_kwargs[k], v)
+                                    for k, v in param_schema.items())
+        docstring = Docstring(contract.get('description'),
+                              parameters=docstring_parameters,
+                              returns=requests.Response)
+        method.__doc__ = str(docstring)
         method.__name__ = name
 
-        # Construct an empty class to hold the method.
+        # Construct an empty, named class to hold the method.
         cls = types.ClassType(str(self.name), (object,), {})
 
         setattr(self, name, types.MethodType(method, self, cls))
 
 
+class Docstring(object):
+    """
+    Representation of a Python docstring.
+    """
+
+    class Parameter(object):
+        """
+        A function parameter.
+
+        Args:
+            name (str): Parameter name (e.g., unit_name).
+            type (callable): Parameter type (e.g., `str`, `int`).
+            required (bool): Whether the parameter is a positional argument
+                (True) or a keyword argument (False).
+        """
+
+        # Match JSON schema types to native Python types.
+        SCHEMA_TYPES = {
+            'array': list,
+            'string': str,
+        }
+
+        def __init__(self, name, type, required=True):
+            self.name = name
+            self.type = type
+            self.required = required
+
+        @classmethod
+        def from_schema(cls, name, schema):
+            name = name
+            type = cls.SCHEMA_TYPES.get(schema.get('type'))
+            required = schema.get('required')
+            return cls(name, type, required)
+
+        def __str__(self):
+            type_ = self.type.__name__
+            if not self.required:
+                type_ = '{}, optional'.format(type_)
+            return '{} ({})'.format(self.name, type_)
+
+
+    def __init__(self, description, parameters=None, returns=None, indent=4):
+        self.description = description
+        self.parameters = [self.Parameter.from_schema(name, schema)
+                           for name, schema in parameters.items()]
+        self.returns = returns
+        self.indent = indent
+        initial_indent = self.indent * ' '
+        subsequent_indent = 2 * initial_indent
+        self._wrapper = textwrap.TextWrapper(initial_indent=initial_indent,
+                                             subsequent_indent=subsequent_indent)
+
+    def __str__(self):
+        """
+        Represent the docstring in Google format.
+        """
+        docstring = [self.description]
+        if self.parameters:
+            arg_lines = ['Args:']
+            for parameter in self.parameters:
+                arg_lines.extend(self._wrapper.wrap(str(parameter)))
+            docstring.append('\n'.join(arg_lines))
+        if self.returns:
+            return_lines = ['Returns:']
+            return_type = self.returns.__name__
+            return_lines.extend(self._wrapper.wrap(return_type))
+            docstring.append('\n'.join(return_lines))
+        return '\n\n'.join(docstring)
+
+
 def camel_to_snake_case(name):
     """
-    Convert a name in CamelCase to snake_case.
+    Convert a name in CamelCase or mixedCase to snake_case.
     """
-    return re.sub(r'(.)([A-Z][a-z]+)', r'\1_\2', name).lower()
+    # By nickl- on StackOverflow: <http://stackoverflow.com/a/12867228>.
+    return re.sub(r'((?<=[a-z0-9])[A-Z]|(?!^)[A-Z](?=[a-z]))', r'_\1', name).lower()
 
 
 def validate_args(name, args, required_args):
